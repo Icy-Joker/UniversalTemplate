@@ -117,9 +117,9 @@ if(${CMAKE_VERSION} VERSION_GREATER_EQUAL 3.13.0)#此模块要求CMake版本至�
       set(PLATFORM "${CMAKE_SYSTEM_PROCESSOR}" CACHE STRING "PLATFORM")
       #配置运行时库加载路径
       set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
-      #set(CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE)
       set(CMAKE_SKIP_BUILD_RPATH TRUE)
-      #set(CMAKE_SKIP_INSTALL_RPATH TRUE)
+      set(CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE)
+      set(CMAKE_SKIP_INSTALL_RPATH FALSE)
       #
       if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         if(CMAKE_SYSTEM_PROCESSOR MATCHES "mips64")
@@ -132,7 +132,7 @@ if(${CMAKE_VERSION} VERSION_GREATER_EQUAL 3.13.0)#此模块要求CMake版本至�
       elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
         list(APPEND CMAKE_INSTALL_RPATH "@executable_path;@loader_path;")
       endif()
-      list(APPEND CMAKE_INSTALL_RPATH ".;../bin;../lib/${CRT_VERSION_NAME}_${PLATFORM};../lib;../thirdparty/bin;")
+      list(APPEND CMAKE_INSTALL_RPATH ".;../bin;../lib/${CRT_VERSION_NAME}_${PLATFORM};../lib;../thirdparty/lib;")
     endif()
 
     #可执行程序输出目录
@@ -158,17 +158,17 @@ if(${CMAKE_VERSION} VERSION_GREATER_EQUAL 3.13.0)#此模块要求CMake版本至�
       set_property(GLOBAL PROPERTY AUTOGEN_SOURCE_GROUP "Moc Files")#
     endif()
 
-    #若未设置安装目录,则自定义安装路径
-    if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-      #获取工程根目录
-      if(DEFINED ENV{INSTALL_DIRECTORY})
-        set(CMAKE_INSTALL_PREFIX_DEFAULT $ENV{INSTALL_DIRECTORY} CACHE PATH "CMAKE_INSTALL_PREFIX_DEFAULT" FORCE)
-      else()
-        get_filename_component(ROOT_DIRECTORY ${CMAKE_SOURCE_DIR} DIRECTORY CACHE)
-        get_filename_component(CMAKE_INSTALL_PREFIX_DEFAULT ${ROOT_DIRECTORY} DIRECTORY CACHE)
-      endif()
-      set(CMAKE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX_DEFAULT} CACHE INTERNAL "CMAKE_INSTALL_PREFIX" FORCE)
-    endif()
+    ##若未设置安装目录,则自定义安装路径
+    #if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    #  #获取工程根目录
+    #  if(DEFINED ENV{INSTALL_DIRECTORY})
+    #    set(CMAKE_INSTALL_PREFIX_DEFAULT $ENV{INSTALL_DIRECTORY} CACHE PATH "CMAKE_INSTALL_PREFIX_DEFAULT" FORCE)
+    #  else()
+    #    get_filename_component(ROOT_DIRECTORY ${CMAKE_SOURCE_DIR} DIRECTORY CACHE)
+    #    get_filename_component(CMAKE_INSTALL_PREFIX_DEFAULT ${ROOT_DIRECTORY} DIRECTORY CACHE)
+    #  endif()
+    #  set(CMAKE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX_DEFAULT} CACHE INTERNAL "CMAKE_INSTALL_PREFIX" FORCE)
+    #endif()
 
     #检测跨语言扩展支持
     include(CheckLanguage)
@@ -288,8 +288,11 @@ macro(configureBoostModules)
       #预查找Boost库,确定Boost版本
       find_package(Boost OPTIONAL_COMPONENTS ${BOOST_MODULE_LIST} QUIET)
       if(Boost_FOUND)
+        if(Boost_INCLUDE_DIRS)
+          target_include_directories(${CURRENT_TARGET} PRIVATE "${Boost_INCLUDE_DIRS}")#
+        endif()
         if(Boost_LIBRARIES)
-          target_link_libraries(${CURRENT_TARGET} PRIVATE "${Boost_LIBRARIES}")#导入Boost公共库/模块依赖
+          target_link_libraries(${CURRENT_TARGET} PRIVATE ${Boost_LIBRARIES})#导入Boost公共库/模块依赖
         else()
           set(BOOST_MODULE_PREFIX "Boost::")
           foreach(CURRENT_MODULE_NAME ${BOOST_MODULE_LIST})
@@ -380,6 +383,9 @@ macro(configureThirdPartyList)
       set_property(TARGET ${CURRENT_TARGET} PROPERTY VS_GLOBAL_ThirdParty "$ENV{ThirdParty}")#设置VS中环境变量:$(ThirdParty)=$ENV{ThirdParty}
       message("\tTHIRD_LIBRARY_LIST:${THIRD_LIBRARY_LIST}")#输出三方库列表
       foreach(CURRENT_LIBRARY_NAME ${THIRD_LIBRARY_LIST})
+        #当前三方库根目录
+        set(CURRENT_LIBRARY_ROOT "$ENV{ThirdParty}/${CURRENT_LIBRARY_NAME}")
+        set(CMAKE_PREFIX_PATH "${CURRENT_LIBRARY_ROOT}")
         find_package(${CURRENT_LIBRARY_NAME} QUIET)
         if(${CURRENT_LIBRARY_NAME}_FOUND)
           if(EXISTS "${${CURRENT_LIBRARY_NAME}_INCLUDE_DIRS}")
@@ -391,8 +397,6 @@ macro(configureThirdPartyList)
             #target_Link_libraries(${CURRENT_TARGET} PRIVATE "${${CURRENT_LIBRARY_NAME}_LIBRARIES}")
           endif()
         else()
-          #当前三方库根目录
-          set(CURRENT_LIBRARY_ROOT "$ENV{ThirdParty}/${CURRENT_LIBRARY_NAME}")
           #添加头文件和静态库搜索路径
           set(CURRENT_LIBRARY_INCLUDE_DIRECTORY "${CURRENT_LIBRARY_ROOT}/include")
           if(EXISTS "${CURRENT_LIBRARY_ROOT}/lib/${CRT_VERSION_NAME}_${PLATFORM}")
@@ -652,7 +656,7 @@ macro(configureTargetForInstall)
       if(${CURRENT_TARGET_TYPE} STREQUAL "MODULE_LIBRARY")#插件库
         if(${CMAKE_CURRENT_SOURCE_DIR} MATCHES "${PROJECT_SOURCE_DIR}/02_Plugins")
           string(REGEX REPLACE "${PROJECT_SOURCE_DIR}/02_Plugins" "plugins" PLUGIN_INSTALL_PATH ${PARENT_DIRECTORY})
-          install(TARGETS ${CURRENT_TARGET} RUNTIME DESTINATION "${PLUGIN_INSTALL_PATH}" LIBRARY DESTINATION "${PLUGIN_INSTALL_PATH}")#插件库安装目录
+          install(TARGETS ${CURRENT_TARGET} RUNTIME DESTINATION "${PLUGIN_INSTALL_PATH}" LIBRARY DESTINATION "lib")#插件库安装目录
         endif()
       else()
         if(${CURRENT_TARGET_TYPE} STREQUAL "EXECUTABLE")#可执行程序
@@ -667,7 +671,7 @@ macro(configureTargetForInstall)
             if(NOT ${PUBLIC_HEADER_DIR} STREQUAL "${PARENT_DIRECTORY}")#二次开发库(公开)
               install(DIRECTORY "${PUBLIC_HEADER_DIR}/${CURRENT_SOURCE_FOLDER}" DESTINATION "include" OPTIONAL)
             endif()
-            install(TARGETS ${CURRENT_TARGET} RUNTIME DESTINATION "bin" LIBRARY DESTINATION "bin" ARCHIVE DESTINATION "lib/${CRT_VERSION_NAME}_${PLATFORM}")#普通动态库(非插件&&仅运行)安装目录
+            install(TARGETS ${CURRENT_TARGET} RUNTIME DESTINATION "bin" LIBRARY DESTINATION "lib" ARCHIVE DESTINATION "lib/${CRT_VERSION_NAME}_${PLATFORM}")#普通动态库(非插件&&仅运行)安装目录
           endif()
         endif()
       endif()
